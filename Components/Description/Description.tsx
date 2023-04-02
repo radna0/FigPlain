@@ -1,14 +1,15 @@
-import { IDescription } from '@/types/Query'
+import { Annotation } from '@/types/Query'
 import React, { useEffect, useState } from 'react'
 import { parseCommand } from '@/Utilities/parse'
 import Explanation from './Explanation'
 import Error from './Error'
 import { annotateTokens } from '@/Utilities/annotate'
 import { loadCompletionSpec } from '@/Utilities/LoadSpec'
+import { IDescription } from '@/types/Components'
 
 const Description: React.FC<IDescription> = ({ query }) => {
   const [error, setError] = useState('')
-  const [annotatedTokens, setAnnotatedTokens] = useState([])
+  const [annotatedTokens, setAnnotatedTokens] = useState<Annotation[]>([])
 
   useEffect(() => {
     setError('')
@@ -35,7 +36,7 @@ const Description: React.FC<IDescription> = ({ query }) => {
         Query: <b>{query}</b>
       </h1>
       {error ? (
-        <Error error={error} />
+        <Error error={error as string} />
       ) : (
         <Explanation tokens={annotatedTokens} />
       )}

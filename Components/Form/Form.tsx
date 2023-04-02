@@ -6,7 +6,7 @@ const Form = () => {
   const router = useRouter()
   useEffect(() => {
     if (router.query.id) setText(router.query.id as string)
-  }, [])
+  }, [router.query])
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
     e.preventDefault()
     if (!text) router.push('/')

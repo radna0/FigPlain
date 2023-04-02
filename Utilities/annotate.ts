@@ -1,115 +1,76 @@
-import { AssertionError } from 'assert'
-import { Subcommand, Option, Arg, CompletionSpec } from '../types/Query'
-import Description from '@/Components/Description/Description'
-
-type Annotation = {
-  value: string[]
-  description: string | string[] | undefined
-}
+import {
+  Subcommand,
+  CompletionSpec,
+  Option,
+  Annotation,
+  Arg,
+} from '../types/Query'
 
 export const annotateTokens = (
   ast: ASTNode,
   completionSpec: CompletionSpec
 ): Annotation[] => {
-  const annotations: Annotation[] = [
-    { value: [ast.value], description: completionSpec.description },
+  let annotations: Annotation[] = [
+    { value: [ast.value], description: [completionSpec.description] },
   ]
+
   // Find the subcommand
   while (ast.children.length && ast.children[0].type == 'argument') {
     ast = ast.children[0]
     const subcommand = findSubcommand(ast.value, completionSpec.subcommands)
     if (!subcommand) break
     annotations[0].value.push(ast.value)
-    annotations[0].description = subcommand.description
+    annotations[0].description = [subcommand.description]
+    ;[ast, annotations] = insertAllOptions(ast, annotations, subcommand)
+
     if (
       'args' in subcommand &&
       ast.children.length &&
       ast.children[0].type == 'argument' &&
       !findSubcommand(ast.children[0].value, completionSpec.subcommands)
     ) {
-      annotations[1] = { value: [], description: [] }
+      annotations[annotations.length] = { value: [], description: [] }
       if (Array.isArray(subcommand.args)) {
         subcommand?.args.forEach((arg) =>
-          annotations[1].description.push(arg.name)
+          annotations[annotations.length - 1].description.push(arg.name)
         )
       } else {
-        annotations[1].description.push(subcommand.args.name)
-      }
-    }
-
-    while (
-      ast.children.length &&
-      ast.children[0].type == 'argument' &&
-      !findSubcommand(ast.children[0].value, completionSpec.subcommands)
-    ) {
-      ast = ast.children[0]
-      annotations[1].value.push(ast.value)
-    }
-    while (ast.children.length && ast.children[0].type == 'option') {
-      ast = ast.children[0]
-      const tagDetails = findOption(ast.value, subcommand.options)
-      if (!tagDetails) break
-      annotations.push({
-        value: ast.value,
-        description: tagDetails?.description,
-      })
-      if ('args' in tagDetails) {
-        annotations.push({
-          value: [],
-          description: [],
-        })
         annotations[annotations.length - 1].description.push(
-          tagDetails.args.name
+          subcommand.args.name
         )
-        while (ast.children.length && ast.children[0].type == 'argument') {
-          ast = ast.children[0]
-          annotations[annotations.length - 1].value.push(ast.value)
-        }
+      }
+      while (
+        ast.children.length &&
+        ast.children[0].type == 'argument' &&
+        !findSubcommand(ast.children[0].value, completionSpec.subcommands)
+      ) {
+        ast = ast.children[0]
+        annotations[annotations.length - 1].value.push(ast.value)
       }
     }
-  }
-  if (ast.children.length && ast.children[0].type == 'argument') {
-    ast = ast.children[0]
-    annotations.push({
-      value: ast.value,
-      description: completionSpec.args?.name,
-    })
+    ;[ast, annotations] = insertAllOptions(ast, annotations, subcommand)
   }
 
+  if (
+    annotations[annotations.length - 1].value.join() != ast.value &&
+    !ast.children.length &&
+    ast.type == 'argument'
+  ) {
+    if (completionSpec.args && 'name' in completionSpec.args)
+      annotations.push({
+        value: [ast.value],
+        description: [completionSpec.args.name as string],
+      })
+  }
   // Traverse the AST tree and annotate each node
   const traverse = (node: ASTNode): void => {
-    if (node.type === 'argument') {
-      const commandName = node.value
-      const commandSpec = completionSpec.subcommands?.find((subcommand) => {
-        return subcommand.name.includes(commandName)
-      })
-      if (commandSpec) {
-        annotations.push({
-          value: commandName,
-          description: commandSpec.description || '',
-        })
-      } else {
-        annotations.push({
-          value: commandName,
-          description: completionSpec.description || '',
-        })
-      }
-    } else if (node.type === 'option') {
+    if (node.type === 'option') {
       const optionName = node.value
-      const optionSpec = completionSpec.options?.find((option) => {
-        return option.name.includes(optionName)
+      const optionSpec = findOption(optionName, completionSpec.options)
+      annotations.push({
+        value: [optionName],
+        description: optionSpec ? [optionSpec.description] : [],
       })
-      if (optionSpec) {
-        annotations.push({
-          value: optionName,
-          description: optionSpec.description || '',
-        })
-      } else {
-        annotations.push({
-          value: optionName,
-          description: 'Tag',
-        })
-      }
     }
 
     if (node.children) {
@@ -120,10 +81,42 @@ export const annotateTokens = (
   return annotations
 }
 
+const insertAllOptions = (
+  ast: ASTNode,
+  annotations: Annotation[],
+  subcommand: Subcommand
+): [ASTNode, Annotation[]] => {
+  while (ast.children.length && ast.children[0].type == 'option') {
+    ast = ast.children[0]
+    const tagDetails = findOption(ast.value, subcommand.options)
+    if (!tagDetails) break
+    annotations.push({
+      value: [ast.value],
+      description: [tagDetails.description],
+    })
+    if (
+      'args' in tagDetails &&
+      ast.children.length &&
+      ast.children[0].type == 'argument'
+    ) {
+      annotations[annotations.length] = { value: [], description: [] }
+      if ('name' in tagDetails.args)
+        annotations[annotations.length - 1].description.push(
+          tagDetails.args.name
+        )
+      while (ast.children.length && ast.children[0].type == 'argument') {
+        ast = ast.children[0]
+        annotations[annotations.length - 1].value.push(ast.value)
+      }
+    }
+  }
+  return [ast, annotations]
+}
 const findSubcommand = (
-  name: string | string[],
-  subcommands: Subcommand[] | undefined
+  name: string | string[] | undefined,
+  subcommands: Subcommand[]
 ): Subcommand | undefined => {
+  if (!name) return undefined
   if (!subcommands) return undefined
 
   return subcommands.find((subcommand) => {
@@ -136,8 +129,8 @@ const findSubcommand = (
 
 const findOption = (
   name: string | string[],
-  options: Subcommand[] | undefined
-): Subcommand | undefined => {
+  options: Option[]
+): Option | undefined => {
   if (!options) return undefined
 
   return options.find((option) => {
