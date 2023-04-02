@@ -1,7 +1,8 @@
 import React from 'react'
 import Card from '../Card/Card'
+import { IExplanation } from '@/types/Components'
 
-function Explanation({ tokens }) {
+const Explanation: React.FC<IExplanation> = ({ tokens }) => {
   if (!tokens) return <div></div>
 
   return (
@@ -10,7 +11,7 @@ function Explanation({ tokens }) {
         {tokens.map((token, index) => {
           return (
             <Card
-              key={token.value}
+              key={token.value.join()}
               header={token.value}
               description={token.description}
             />
