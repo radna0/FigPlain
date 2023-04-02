@@ -5,7 +5,6 @@ const Form = () => {
   const [text, setText] = useState('')
   const router = useRouter()
   useEffect(() => {
-    console.log(router.query)
     if (router.query.id) setText(router.query.id as string)
   }, [])
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {

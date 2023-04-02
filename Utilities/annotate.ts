@@ -1,83 +1,123 @@
-import {
-  Subcommand,
-  Option,
-  Arg,
-  ParsedCommand,
-  CompletionSpec,
-  allAnnotations,
-} from '../types/Query'
+import { AssertionError } from 'assert'
+import { Subcommand, Option, Arg, CompletionSpec } from '../types/Query'
+import Description from '@/Components/Description/Description'
+
+type Annotation = {
+  value: string[]
+  description: string | string[] | undefined
+}
 
 export const annotateTokens = (
-  parsedCommand: ParsedCommand,
+  ast: ASTNode,
   completionSpec: CompletionSpec
-) => {
-  const allAnnotations: allAnnotations = {
-    tags: [],
-  }
-  allAnnotations['commandName'] = [
-    [parsedCommand.commandName],
-    completionSpec.description,
+): Annotation[] => {
+  const annotations: Annotation[] = [
+    { value: [ast.value], description: completionSpec.description },
   ]
-  allAnnotations['args'] = [parsedCommand?.args, []]
-  // Annotate subcommand
-  if (parsedCommand.subcommandName) {
-    if (!completionSpec.subcommands) {
-      allAnnotations['args'][0] = Array.isArray(parsedCommand.subcommandName)
-        ? parsedCommand.subcommandName
-        : [parsedCommand.subcommandName]
-    } else {
-      const subcommand = findSubcommand(
-        parsedCommand.subcommandName,
-        completionSpec.subcommands
-      )
-      if (subcommand) {
-        allAnnotations['commandName'][0].push(parsedCommand.subcommandName)
-        allAnnotations['commandName'][1] = subcommand.description
-        if (
-          Array.isArray(subcommand.args) &&
-          !allAnnotations['args'][1].length
-        ) {
-          subcommand?.args.forEach((arg) =>
-            allAnnotations['args'][1].push(arg.name)
-          )
-        } else if (!allAnnotations['args'][1].length) {
-          allAnnotations['args'][1].push(subcommand.args.name)
-        }
-      }
-      if (subcommand && parsedCommand.optionTags?.length) {
-        for (let tag of parsedCommand.optionTags) {
-          if (tag == '--') continue
-          const tagDetails = findOption(tag, subcommand.options)
-          if (!tagDetails) continue
-          allAnnotations['tags']?.push({
-            tagName: tag,
-            description: tagDetails.description,
-          })
-          if (tagDetails.args)
-            allAnnotations['args'][1].push(tagDetails.args.name)
-        }
+  // Find the subcommand
+  while (ast.children.length && ast.children[0].type == 'argument') {
+    ast = ast.children[0]
+    const subcommand = findSubcommand(ast.value, completionSpec.subcommands)
+    if (!subcommand) break
+    annotations[0].value.push(ast.value)
+    annotations[0].description = subcommand.description
+    if (
+      'args' in subcommand &&
+      ast.children.length &&
+      ast.children[0].type == 'argument' &&
+      !findSubcommand(ast.children[0].value, completionSpec.subcommands)
+    ) {
+      annotations[1] = { value: [], description: [] }
+      if (Array.isArray(subcommand.args)) {
+        subcommand?.args.forEach((arg) =>
+          annotations[1].description.push(arg.name)
+        )
+      } else {
+        annotations[1].description.push(subcommand.args.name)
       }
     }
-  }
-  if (Array.isArray(completionSpec.args) && !allAnnotations['args'][1].length) {
-    completionSpec.args.forEach((arg) =>
-      allAnnotations['args'][1].push(arg.name)
-    )
-  } else if (!allAnnotations['args'][1].length) {
-    allAnnotations['args'][1].push(completionSpec.args.name)
-  }
 
-  if (parsedCommand.optionTags?.length && !allAnnotations['tags'].length) {
-    for (let tag of parsedCommand.optionTags) {
-      if (tag == '--') continue
-      const tagDetails = findOption(tag, completionSpec.options)
-      allAnnotations['tags'].push({
-        tagName: tag,
+    while (
+      ast.children.length &&
+      ast.children[0].type == 'argument' &&
+      !findSubcommand(ast.children[0].value, completionSpec.subcommands)
+    ) {
+      ast = ast.children[0]
+      annotations[1].value.push(ast.value)
+    }
+    while (ast.children.length && ast.children[0].type == 'option') {
+      ast = ast.children[0]
+      const tagDetails = findOption(ast.value, subcommand.options)
+      if (!tagDetails) break
+      annotations.push({
+        value: ast.value,
         description: tagDetails?.description,
       })
+      if ('args' in tagDetails) {
+        annotations.push({
+          value: [],
+          description: [],
+        })
+        annotations[annotations.length - 1].description.push(
+          tagDetails.args.name
+        )
+        while (ast.children.length && ast.children[0].type == 'argument') {
+          ast = ast.children[0]
+          annotations[annotations.length - 1].value.push(ast.value)
+        }
+      }
     }
   }
-  return allAnnotations
+  if (ast.children.length && ast.children[0].type == 'argument') {
+    ast = ast.children[0]
+    annotations.push({
+      value: ast.value,
+      description: completionSpec.args?.name,
+    })
+  }
+
+  // Traverse the AST tree and annotate each node
+  const traverse = (node: ASTNode): void => {
+    if (node.type === 'argument') {
+      const commandName = node.value
+      const commandSpec = completionSpec.subcommands?.find((subcommand) => {
+        return subcommand.name.includes(commandName)
+      })
+      if (commandSpec) {
+        annotations.push({
+          value: commandName,
+          description: commandSpec.description || '',
+        })
+      } else {
+        annotations.push({
+          value: commandName,
+          description: completionSpec.description || '',
+        })
+      }
+    } else if (node.type === 'option') {
+      const optionName = node.value
+      const optionSpec = completionSpec.options?.find((option) => {
+        return option.name.includes(optionName)
+      })
+      if (optionSpec) {
+        annotations.push({
+          value: optionName,
+          description: optionSpec.description || '',
+        })
+      } else {
+        annotations.push({
+          value: optionName,
+          description: 'Tag',
+        })
+      }
+    }
+
+    if (node.children) {
+      node.children.forEach(traverse)
+    }
+  }
+  if (ast.children.length) ast.children.forEach(traverse)
+  return annotations
 }
 
 const findSubcommand = (
